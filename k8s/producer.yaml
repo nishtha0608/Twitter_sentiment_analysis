@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: sentiment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+  template:
+    metadata:
+      labels:
+        app: producer
+    spec:
+      containers:
+        - name: producer
+          image: sentiment-producer:latest
+          imagePullPolicy: Never
+          env:
+            - name: KAFKA_BROKER
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "tweets"
+            - name: SEARCH_QUERY
+              value: "AI"
+            - name: POLL_INTERVAL_SECONDS
+              value: "30"
+            - name: MAX_RESULTS
+              value: "50"
+            - name: TWITTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: twitter-secrets
+                  key: TWITTER_API_KEY
+            - name: TWITTER_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: twitter-secrets
+                  key: TWITTER_API_SECRET
+            - name: TWITTER_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: twitter-secrets
+                  key: TWITTER_BEARER_TOKEN
+      restartPolicy: Always

@@ -1,16 +1,45 @@
-# Twitter Sentiment Analyzer
+# Twitter Real-Time Sentiment Analysis
 
-A web app that fetches real-time tweets and analyzes their sentiment using VADER NLP. Built with Python, Tweepy, and Streamlit.
+A production-grade sentiment analysis pipeline that streams tweets in real time, classifies them using BERT, stores results in MongoDB, and displays live insights on an interactive dashboard.
 
 ---
 
-## Features
+## Architecture
 
-- Search any keyword or hashtag on X (Twitter)
-- Classifies tweets as Positive, Neutral, or Negative
-- Interactive pie chart and score distribution histogram
-- Filter tweets by sentiment
-- Download results as CSV
+```
+Twitter API
+    │
+    ▼
+┌─────────────┐      ┌───────────────┐      ┌──────────────┐
+│   Producer  │─────▶│  Apache Kafka │─────▶│   Consumer   │
+│  (Tweepy)   │      │  (tweets topic│      │ (BERT model) │
+└─────────────┘      └───────────────┘      └──────┬───────┘
+                                                   │
+                                                   ▼
+                                          ┌─────────────────┐
+                                          │    MongoDB       │
+                                          │  (sentiment_db)  │
+                                          └────────┬────────┘
+                                                   │
+                                                   ▼
+                                          ┌─────────────────┐
+                                          │   Dashboard      │
+                                          │  (Streamlit +    │
+                                          │   Plotly)        │
+                                          └─────────────────┘
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Data ingestion | Python · Tweepy · Twitter API v2 |
+| Message broker | Apache Kafka |
+| NLP model | BERT (`twitter-roberta-base-sentiment`) |
+| Database | MongoDB |
+| Dashboard | Streamlit · Plotly |
+| Containers | Docker · Docker Compose |
+| Orchestration | Kubernetes |
 
 ---
 
@@ -18,79 +47,113 @@ A web app that fetches real-time tweets and analyzes their sentiment using VADER
 
 ```
 Sentiment Analysis/
-├── app.py              # Streamlit web app
-├── sentiment.py        # Tweet fetching + sentiment logic
-├── requirements.txt    # Python dependencies
-├── Dockerfile          # Docker image definition
-├── docker-compose.yml  # Docker Compose config
-├── .env                # API keys (never commit this)
+├── producer/
+│   ├── producer.py        # Fetch tweets → publish to Kafka
+│   ├── requirements.txt
+│   └── Dockerfile
+├── consumer/
+│   ├── consumer.py        # Kafka → BERT → MongoDB
+│   ├── requirements.txt
+│   └── Dockerfile
+├── dashboard/
+│   ├── app.py             # Streamlit + Plotly dashboard
+│   ├── requirements.txt
+│   └── Dockerfile
+├── k8s/
+│   ├── namespace.yaml
+│   ├── secrets.yaml
+│   ├── zookeeper.yaml
+│   ├── kafka.yaml
+│   ├── mongodb.yaml
+│   ├── producer.yaml
+│   ├── consumer.yaml
+│   └── dashboard.yaml
+├── docker-compose.yml
+├── .env                   # API keys — never commit
 └── .gitignore
 ```
 
 ---
 
-## Setup
+## Quick Start (Docker)
 
-### 1. Get Twitter API Keys
-
-1. Go to [developer.twitter.com](https://developer.twitter.com)
-2. Create an app and get your **Consumer Key**, **Consumer Secret**, and **Bearer Token**
-
-### 2. Configure `.env`
+### 1. Configure `.env`
 
 ```
 TWITTER_API_KEY=your_consumer_key
 TWITTER_API_SECRET=your_consumer_secret
-TWITTER_BEARER_TOKEN=your_bearer_token
+TWITTER_BEARER_TOKEN=your_bearer_token   # optional — auto-fetched if blank
+SEARCH_QUERY=AI
 ```
 
----
-
-## Running Locally
-
-```bash
-pip3 install -r requirements.txt
-python3 -m streamlit run app.py
-```
-
-Open [http://localhost:8501](http://localhost:8501)
-
----
-
-## Running with Docker
-
-### Build and start
+### 2. Build and run
 
 ```bash
 docker compose up --build
 ```
 
-### Stop
+Open [http://localhost:8501](http://localhost:8501)
+
+### 3. Stop
 
 ```bash
 docker compose down
 ```
 
-Open [http://localhost:8501](http://localhost:8501)
+---
 
-> Make sure Docker Desktop is running before executing these commands.
+## Kubernetes Deployment
+
+### 1. Build images
+
+```bash
+docker build -t sentiment-producer:latest ./producer
+docker build -t sentiment-consumer:latest ./consumer
+docker build -t sentiment-dashboard:latest ./dashboard
+```
+
+### 2. Fill in secrets
+
+Edit `k8s/secrets.yaml` with your Twitter API keys.
+
+### 3. Deploy
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/secrets.yaml
+kubectl apply -f k8s/zookeeper.yaml
+kubectl apply -f k8s/kafka.yaml
+kubectl apply -f k8s/mongodb.yaml
+kubectl apply -f k8s/producer.yaml
+kubectl apply -f k8s/consumer.yaml
+kubectl apply -f k8s/dashboard.yaml
+```
+
+### 4. Access dashboard
+
+```bash
+kubectl port-forward svc/dashboard 8501:8501 -n sentiment
+```
+
+Open [http://localhost:8501](http://localhost:8501)
 
 ---
 
-## Tech Stack
+## Configuration
 
-| Tool | Purpose |
-|---|---|
-| [Tweepy](https://www.tweepy.org/) | Twitter API client |
-| [VADER](https://github.com/cjhutto/vaderSentiment) | Sentiment analysis |
-| [Streamlit](https://streamlit.io/) | Web UI |
-| [Plotly](https://plotly.com/) | Interactive charts |
-| [pandas](https://pandas.pydata.org/) | Data handling |
+| Variable | Default | Description |
+|---|---|---|
+| `SEARCH_QUERY` | `AI` | Keyword or hashtag to track |
+| `POLL_INTERVAL_SECONDS` | `30` | How often to fetch new tweets |
+| `MAX_RESULTS` | `50` | Tweets per poll (max 100 on free tier) |
+| `KAFKA_TOPIC` | `tweets` | Kafka topic name |
+| `MONGO_DB` | `sentiment_db` | MongoDB database name |
 
 ---
 
 ## Notes
 
-- Free Twitter API tier allows up to **500,000 tweets/month**
-- Only **recent tweets (last 7 days)** are available on the free tier
-- Never commit your `.env` file — it contains secret API keys
+- BERT model downloads automatically on first consumer startup (~500MB)
+- Free Twitter API allows up to 500,000 tweets/month, last 7 days only
+- Consumer runs 2 replicas in Kubernetes for parallel BERT inference
+- `.env` is excluded from git — never commit API keys
